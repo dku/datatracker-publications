@@ -7,11 +7,16 @@ for IETF documents (RFCs and Internet Drafts).
 1. [tracker-doc](tracker-doc): for fetching document metadata by user-id (datatracker ID)
 2. [bibdoc](bibdoc): for formatting document metadata in text or bibtex format
 
+These are two Clojure scripts that are executed by
+[Babashka](https://github.com/babashka/babashka) – a native Clojure
+interpreter for scripting. Please see below for installation
+instructions.
+
 
 ## Usage
 
 ### tracker-doc
-Fetching document metadata by user-id (datatracker ID).
+Fetching document metadata by user-id (datatracker ID) from the IETF datatracker.
 
     Usage: tracker-docs <options> user-id
 	
@@ -24,13 +29,13 @@ Fetching document metadata by user-id (datatracker ID).
 
 Example:
 ``` bash
-./tracker-docs --rfcs dirk.kutscher@neclab.eu 
+./tracker-doc --rfcs dirk.kutscher@neclab.eu 
 rfc3259 rfc6920 rfc6920 rfc7069 rfc7778 rfc7927 rfc7927 rfc8763
 ```
 
 Example:
 ``` bash
-./tracker-docs --active-ids dirk.kutscher@neclab.eu 
+./tracker-doc --active-ids dirk.kutscher@neclab.eu 
 draft-irtf-t2trg-iot-edge draft-li-icnrg-damc draft-oran-icnrg-reflexive-forwarding draft-irtf-coinrg-dir draft-fmbk-icnrg-metaverse
 ```
 
@@ -95,3 +100,8 @@ Akbar Rahman, Dirk Trossen, Dirk Kutscher, Ravi Ravindran; Deployment Considerat
 ## Dependencies
 
 * [Babashka – native Clojure interpreter for scripting](https://github.com/babashka/babashka)
+
+## TODO
+
+* better error handling
+* documentation
