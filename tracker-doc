@@ -1,0 +1,186 @@
+#!/usr/bin/env bb
+
+;; This file is part of Dirk Kutscher's datatracker-publications
+;; project and is released under the GPL-v3 License:
+;; http://www.gnu.org/licenses/gpl-3.0.html
+
+(require '[babashka.curl :as curl])
+(require '[babashka.pods :as pods])
+(require '[clojure.string :as string])
+(require '[babashka.cli :as cli])
+
+(pods/load-pod 'retrogradeorbit/bootleg "0.1.9") ; provides Hickory
+
+(require '[pod.retrogradeorbit.bootleg.utils :as utils])
+(require '[pod.retrogradeorbit.bootleg.enlive :as enlive])
+(require '[pod.retrogradeorbit.hickory.select :as s])
+
+
+(defn assoc-same-value
+  "Associates each key in a set of keys with the same value in a map."
+  [keys value & [initial-map]]
+  (reduce (fn [acc k] (assoc acc k value))
+          (or initial-map {})
+          keys))
+
+
+(defn fetch-html [user-id]
+  (let [url (str "https://datatracker.ietf.org/person/" user-id)]
+;    (println "Fetching" url)
+    (let [
+          response (curl/get url)]
+      (:body response))))
+
+(defn parse-html [html-content]
+  (utils/convert-to html-content :hickory))
+
+
+(defn element-text [element]
+  ;; Assuming the text is under the :content key, adjust as necessary
+  (when element
+    (str/join "" (map :content element))))
+
+(defn extract-rfcs [parsed-html]
+  (let [rfcs-section (first (s/select parsed-html [:h2#rfcs-1 + "table"]))
+        rows (s/select rfcs-section ["tr"])]
+    (map #(element-text (s/select % ["td"]))
+         (drop 1 rows)))) ;; Assuming first row is headers
+
+
+(def tr-selector (s/tag :tr))
+(def td-selector (s/tag :td))
+(def a-selector (s/tag :a))
+
+(def rfc-selector 
+  (s/descendant (s/tag :tbody)
+    (s/descendant tr-selector
+      (s/descendant td-selector a-selector))))
+
+
+(defn get-rfc-names [td-elements]
+  (filter some?
+          (mapcat (fn [td-element]
+            (map (fn [child]
+                   (when (and (= (:tag child) :a)
+                              (re-find #"/doc/rfc[0-9]+/" (:href (:attrs child))))
+                     (let [href (:href (:attrs child))
+                           rfc-match (re-find #"/doc/(rfc[0-9]+)/" href)]
+                       (when rfc-match
+                         (second rfc-match)))))
+                  (:content td-element)))
+          td-elements)))
+
+
+(defn extract-rfc-names [parsed-html]
+  (let [
+        td-elements (s/select rfc-selector parsed-html)
+        all-td-elements (s/select
+                         (s/descendant (s/tag :tbody) 
+                                       (s/descendant tr-selector 
+                                                     td-selector)) 
+                         parsed-html)
+
+;; Filter to keep only td elements that contain an a tag with href containing "/doc/rfc"
+        rfc-td-elements (filter (fn [td-element]
+                                  (some (fn [child]
+                                          (and (= (:tag child) :a)
+                                               (re-find #"/doc/rfc" (:href (:attrs child)))))
+                                        (:content td-element)))
+                                all-td-elements)]
+    (get-rfc-names rfc-td-elements)))
+  
+
+(defmulti draft-selector (fn [tag] tag))
+
+(defmethod draft-selector :id-active [_]
+  (s/follow-adjacent (s/id :drafts-1) (s/tag :ul)))
+
+(defmethod draft-selector :id-expired [_]
+  (s/follow-adjacent (s/id :drafts-1) (s/tag :ul) (s/tag :h2) (s/tag :ul)))
+
+
+(defn extract-draft-names [tag parsed-html]
+  (let [selector (draft-selector tag)
+        ul-element (first (s/select selector parsed-html))
+        a-tags (s/select (s/descendant (s/tag :a)) ul-element)]
+    (map #(string/trim (-> % :content first)) a-tags)))
+
+
+(defn process-and-print [parsed-html option extractor-fn]
+  (when option
+    (->> (extractor-fn parsed-html)
+         (clojure.string/join " ")
+         println)))
+
+
+(def cli-opts {:coerce {:help :boolean
+                         :rfcs :boolean
+                         :active-ids :boolean
+                         :expired-ids :boolean
+                         :all-ids :boolean
+                         :all :boolean}
+               :args->opts [:user-id]})
+
+(def doctype-keys
+  (disj (set (keys (:coerce cli-opts))) :help :all :all-ids))
+
+(def id-keys
+  [:active-ids :expired-ids])
+
+(defn only-key? [col k]
+  (empty? (disj (set (keys col)) k)))
+
+(def help-msg
+  "Usage: tracker-doc <options> user-id
+  
+  Options
+  
+  --rfcs        get RFCs
+  --active-ids  get active Internet Drafts
+  --expired-ids get expired Internet Drafts
+  --all-ids     get all Internet Drafts
+  --all         get all RFCs and Internet Drafts (default)")
+
+(defn main [& arg-list]
+  (let [
+        args (cli/parse-args (first arg-list) cli-opts)
+        opts (:opts args)
+        user-id (:user-id opts)
+        no-options?  (only-key? opts :user-id)
+        options (if (or no-options? (:all opts))
+                  (assoc-same-value doctype-keys true opts)
+                  (if (:all-ids opts)
+                    (assoc-same-value id-keys true opts)
+                    opts))
+        ]
+
+;    (println "Options: " options)
+    (cond
+      (:help options) (do
+                        (println help-msg)
+                        (System/exit 0))
+      
+      (empty? user-id) (do
+                         (println "User ID is required.")
+                         (System/exit 1))
+      
+      :default (do
+;                 (println "User ID:" user-id)
+                 (let [html-content (fetch-html user-id)
+                       parsed-html (parse-html html-content)]
+                   (process-and-print parsed-html (:rfcs options) extract-rfc-names)
+                   (process-and-print parsed-html (:active-ids options) (partial extract-draft-names :id-active))
+                   (process-and-print parsed-html (:expired-ids options) (partial extract-draft-names :id-expired)))))))
+
+
+
+(defn -main [& args]
+  (main args))
+
+
+(main *command-line-args*)
+
+
+
+
+

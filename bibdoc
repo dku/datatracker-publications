@@ -1,0 +1,179 @@
+#!/usr/bin/env bb
+
+;; This file is part of Dirk Kutscher's datatracker-publications
+;; project and is released under the GPL-v3 License:
+;; http://www.gnu.org/licenses/gpl-3.0.html
+
+(require '[clojure.string :as string])
+(require '[babashka.curl :as curl])
+(require '[babashka.cli :as cli])
+(require '[cheshire.core :as json])
+
+(defn extract-digits [s]
+  (->> s
+       (re-seq #"\d") ; Finds all occurrences of digits
+       (apply str))) ; Joins them into a single string
+
+
+(def months ["January" "February" "March" "April" "May" "June" "July" "August" "September" "October" "November" "December"])
+(defn date-month
+  "returns month in text form"
+  [month]
+  (nth months (dec (Integer/parseInt month))))
+
+
+
+(defn fetch-metadata [draft-name]
+  (let [url (str "https://datatracker.ietf.org/doc/" (string/trim draft-name) "/doc.json")
+        response (curl/get url {:accept :json})
+        data (json/parse-string (:body response) true)]
+    data))
+
+
+(defn author-string [metadata]
+  (let [authors (get-in metadata [:authors])]
+    (if (empty? authors)
+      ""
+      (clojure.string/join ", " (map :name authors)))))
+
+(defn title-string [metadata]
+  (let [title (get-in metadata [:title])]
+    (if (empty? title)
+      ""
+      title)))
+
+
+(defn draft-string [metadata]
+  (let [draft (get-in metadata [:name])]
+    (if (empty? draft)
+      ""
+      (str "Internet Draft " draft " (Work in Progress)"))))
+
+
+(defn rfc-string [metadata]
+  (let [rfc (get-in metadata [:name])]
+    (if (empty? rfc)
+      ""
+      (clojure.string/upper-case rfc))))
+
+(defn date-data
+  "return [year month day]"
+  [date]
+  (clojure.string/split (first (clojure.string/split date #" ")) #"-"))
+
+
+(defn date-string [metadata]
+  (let [date (get-in metadata [:time])]
+    (if (empty? date)
+      ""
+      (let [[year month _] (date-data date)]
+        (str (date-month month) " " year)))))
+
+
+(defn id-latest [metadata]
+  (let [draft (last (get-in metadata [:rev_history]))]
+    (if (empty? draft)
+      ""
+      (get-in draft [:url]))))
+
+(defn id-latest-name [metadata]
+  (let [name (id-latest metadata)]
+    (string/replace
+     (string/replace (id-latest metadata) #"/doc/" "")
+     #"/$" "")))
+
+(defn uri-string [metadata]
+  (let [uri (id-latest metadata)]
+    (str "https://datatracker.ietf.org" uri)))
+
+
+(defn doc-type [metadata]
+  (let [name (get-in metadata [:name])]
+    (if (clojure.string/starts-with? name "rfc")
+      :rfc
+      :draft)))
+
+
+(defmulti format-rfc (fn [output-type metadata] output-type))
+
+(defmethod format-rfc :bibtex [_ metadata]
+  (let [rfc-number (extract-digits (:name metadata))
+        [year month _] (date-data (:time metadata))
+        ]
+    (str "@techreport{RFC" rfc-number ",\n"
+         "  author = \"" (author-string metadata) "\",\n"
+         "  title = \"" (title-string metadata) "\",\n"
+         "  howpublished = \"Internet Requests for Comments\",\n"
+         "  type = \"RFC\",\n"
+         "  number = \"" rfc-number "\",\n"
+       "  year = \"" year "\",\n"
+       "  month = \"" (date-month month) "\",\n"
+       "  issn = \"" "2070-1721" "\",\n"
+       "  publisher = \"RFC Editor\",\n"
+       "  institution = \"RFC Editor\",\n"
+       "}")))
+  
+(defmethod format-rfc :text [_ metadata]
+  (clojure.string/join "; " [(author-string metadata) (title-string metadata) (rfc-string metadata)
+                             (date-string metadata) (uri-string metadata)]))
+
+
+
+(defmulti format-id (fn [output-type metadata] output-type))
+
+(defmethod format-id :bibtex [_ metadata]
+    (let [
+        [year month _] (date-data (:time metadata))
+        ]
+    (str "@techreport{I-D." (:name metadata) ",\n"
+         "  author = \"" (author-string metadata) "\",\n"
+         "  title = \"" (title-string metadata) "\",\n"
+         "  howpublished = \"Work In Progress\",\n"
+         "  type = \"Internet Draft\",\n"
+         "  number = \"" (id-latest-name metadata) "\",\n"
+         "  howpublished = \"\\url{" (uri-string metadata) "}\",\n"
+       "  year = \"" year "\",\n"
+       "  month = \"" (date-month month) "\",\n"
+       "  institution = \"IETF Secretariat\",\n"
+       "}")))
+
+
+
+
+(defmethod format-id :text [_ metadata]
+    (clojure.string/join "; " [(author-string metadata) (title-string metadata) (draft-string metadata)
+                             (date-string metadata) (uri-string metadata)]))
+
+
+
+(defn format-doc [output-type metadata]
+  (if (= (doc-type metadata) :rfc)
+    (format-rfc output-type metadata)
+    (format-id output-type metadata)))
+
+
+(defn read-stdin []
+  (doall (line-seq (java.io.BufferedReader. *in*))))
+
+(defn generate-output [args output-type]
+  (let [doc-strings (map (partial format-doc output-type) (map fetch-metadata args))]
+    (println (clojure.string/join "\n" doc-strings))))
+
+(defn selected? [opt options]
+  (get (:opts options) opt))
+
+(defn -main [& args]
+  (let [options (cli/parse-args (first args)
+                                {:coerce {:stdin :boolean
+                                          :bibtex :boolean}})]
+    (let [
+          input (if (selected? :stdin options)
+                  (string/split (string/join " " (read-stdin)) #" ")
+                  (:args options))
+          output-type (if (selected? :bibtex options)
+                        :bibtex
+                        :text)
+          ]
+    (generate-output input output-type))))
+
+(-main *command-line-args*)
