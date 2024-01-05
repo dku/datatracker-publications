@@ -100,8 +100,15 @@ Akbar Rahman, Dirk Trossen, Dirk Kutscher, Ravi Ravindran; Deployment Considerat
 ## Dependencies
 
 * [Babashka – native Clojure interpreter for scripting](https://github.com/babashka/babashka)
+* [bootleg pod for
+  Babashka](https://github.com/retrogradeorbit/bootleg) (for HTML
+  parsing with [Hickory](https://github.com/clj-commons/hickory), will
+  be installed automatically when running the scripts)
 
 ## TODO
 
 * better error handling
 * documentation
+
+## Acknowledgments
+
