@@ -87,6 +87,15 @@
     (str "https://datatracker.ietf.org" uri)))
 
 
+(defn doi [metadata]
+  (let [rfc (rfc-string metadata)]
+    (str "10.17487/" rfc)))
+
+
+(defn doi-string [metadata]
+    (str "DOI: " (doi metadata)))
+
+
 (defn doc-type [metadata]
   (let [name (get-in metadata [:name])]
     (if (clojure.string/starts-with? name "rfc")
@@ -111,11 +120,15 @@
        "  issn = \"" "2070-1721" "\",\n"
        "  publisher = \"RFC Editor\",\n"
        "  institution = \"RFC Editor\",\n"
+       "  doi = \"" (doi metadata) "\",\n"
        "}")))
   
+
+
 (defmethod format-rfc :text [_ metadata]
-  (clojure.string/join "; " [(author-string metadata) (title-string metadata) (rfc-string metadata)
-                             (date-string metadata) (uri-string metadata)]))
+  (->> [author-string title-string rfc-string date-string uri-string doi-string]
+       (map #(% metadata))
+       (clojure.string/join "; ")))
 
 
 
@@ -138,12 +151,10 @@
        "}")))
 
 
-
-
 (defmethod format-id :text [_ metadata]
-    (clojure.string/join "; " [(author-string metadata) (title-string metadata) (draft-string metadata)
-                             (date-string metadata) (uri-string metadata)]))
-
+    (->> [author-string title-string draft-string date-string uri-string]
+       (map #(% metadata))
+       (clojure.string/join "; ")))
 
 
 (defn format-doc [output-type metadata]

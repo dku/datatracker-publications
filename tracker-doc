@@ -58,7 +58,7 @@
 
 
 (defn get-rfc-names [td-elements]
-  (filter some?
+  (set (filter some?
           (mapcat (fn [td-element]
             (map (fn [child]
                    (when (and (= (:tag child) :a)
@@ -68,7 +68,7 @@
                        (when rfc-match
                          (second rfc-match)))))
                   (:content td-element)))
-          td-elements)))
+          td-elements))))
 
 
 (defn extract-rfc-names [parsed-html]
